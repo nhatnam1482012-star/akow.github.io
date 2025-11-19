@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Airplane Adventure — Offline HTML Game</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0b1220;color:#ddd;font-family:Inter,system-ui,Arial}
+    #gameWrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px}
+    canvas{background:#213044;border:6px solid #0d1a26;border-radius:8px;display:block}
+    .hud{display:flex;gap:10px;align-items:center}
+    .panel{background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:8px}
+    button{background:#2c6; border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .small{font-size:13px;color:#bfe}
+  </style>
+</head>
+<body>
+  <div id="gameWrap">
+    <h2>Airplane Adventure — Offline</h2>
+    <div class="hud">
+      <div class="panel small">Level: <span id="levelN">1</span></div>
+      <div class="panel small">HP: <span id="hp">100</span></div>
+      <div class="panel small">Enemies: <span id="enCnt">0</span></div>
+      <button id="restart">Restart</button>
+    </div>
+    <canvas id="c" width="960" height="640"></canvas>
+    <div class="small panel">Controls: Move = WASD / Arrow keys. Aim with mouse. Click to shoot (recoil nhẹ). Qua cổng xanh hoặc tiêu diệt tất cả kẻ địch để qua màn.</div>
+  </div>
+
+<script>
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dist2=(x1,y1,x2,y2)=>{const dx=x1-x2,dy=y1-y2;return dx*dx+dy*dy};
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W=canvas.width,H=canvas.height;
+let keys={},mouse={x:W/2,y:H/2,down:false};
+window.addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();mouse.x=(e.clientX-r.left)*(canvas.width/r.width);mouse.y=(e.clientY-r.top)*(canvas.height/r.height)});
+canvas.addEventListener('mousedown',()=>mouse.down=true);
+canvas.addEventListener('mouseup',()=>mouse.down=false);
+function makePlayer(x,y){return{x,y,angle:0,vx:0,vy:0,radius:16,hp:100,fireCooldown:0,turnSmooth:0}}
+function makeBullet(x,y,vx,vy,owner){return{x,y,vx,vy,owner,life:2.5}}
+function makeEnemy(x,y){return{x,y,vx:0,vy:0,radius:16,hp:30,shotTimer:Math.random()*2}}
+function makeObstacle(x,y,w,h){return{x,y,w,h}}
+const LEVELS=[{playerStart:[120,120],gate:{x:880,y:540,r:26},obstacles:[makeObstacle(300,100,40,240),makeObstacle(500,320,320,40),makeObstacle(120,340,200,40)],enemies:[makeEnemy(700,120),makeEnemy(700,300)]},{playerStart:[80,540],gate:{x:880,y:60,r:26},obstacles:[makeObstacle(200,200,480,30),makeObstacle(200,360,480,30),makeObstacle(420,60,30,120)],enemies:[makeEnemy(500,120),makeEnemy(720,220),makeEnemy(560,420)]},{playerStart:[480,320],gate:{x:920,y:300,r:26},obstacles:[makeObstacle(160,120,40,400),makeObstacle(360,0,40,320),makeObstacle(560,200,40,440),makeObstacle(760,60,40,360)],enemies:[makeEnemy(120,120),makeEnemy(120,500),makeEnemy(900,100),makeEnemy(900,500)]}];
+let currentLevelIndex=0,player,bullets=[],enemies=[],obstacles=[],gate;
+function loadLevel(i){const lvl=LEVELS[i%LEVELS.length];currentLevelIndex=i%LEVELS.length;player=makePlayer(...lvl.playerStart);bullets=[];enemies=lvl.enemies.map(e=>({...e}));obstacles=lvl.obstacles.map(o=>({...o}));gate={...lvl.gate};document.getElementById('levelN').textContent=(currentLevelIndex+1);updateHud();}
+function circleRectColl(cx,cy,r,rx,ry,rw,rh){const closestX=clamp(cx,rx,rx+rw);const closestY=clamp(cy,ry,ry+rh);const dx=cx-closestX,dy=cy-closestY;return dx*dx+dy*dy<=r*r;}
+function resolveCircleRect(obj){
+  // Giới hạn map vô hình (viền ngoài map)
+  obj.x = clamp(obj.x, obj.radius, W - obj.radius);
+  obj.y = clamp(obj.y, obj.radius, H - obj.radius);
+  for(const o of obstacles){if(circleRectColl(obj.x,obj.y,obj.radius,o.x,o.y,o.w,o.h)){const cx=o.x+o.w/2,cy=o.y+o.h/2;let dx=obj.x-cx,dy=obj.y-cy;if(Math.abs(dx)<1&&Math.abs(dy)<1){dx=Math.random()-0.5;dy=Math.random()-0.5}const a=Math.abs(dx)-(o.w/2+obj.radius);const b=Math.abs(dy)-(o.h/2+obj.radius);if(Math.abs(a)<Math.abs(b)){obj.x+=(dx>0?1:-1)*(Math.abs(a)+0.5);obj.vx*=0.2;}else{obj.y+=(dy>0?1:-1)*(Math.abs(b)+0.5);obj.vy*=0.2;}}}}
+let last=performance.now();
+function update(){const now=performance.now();const dt=Math.min(0.033,(now-last)/1000);last=now;const speed=220;let ax=0,ay=0;if(keys['w']||keys['arrowup'])ay-=1;if(keys['s']||keys['arrowdown'])ay+=1;if(keys['a']||keys['arrowleft'])ax-=1;if(keys['d']||keys['arrowright'])ax+=1;const len=Math.hypot(ax,ay);if(len>0){ax=ax/len*speed;ay=ay/len*speed;}player.vx+=ax*dt;player.vy+=ay*dt;player.vx*=0.985;player.vy*=0.985;player.x+=player.vx*dt;player.y+=player.vy*dt;const targetAngle=Math.atan2(mouse.y-player.y,mouse.x-player.x);let diff=targetAngle-player.angle;diff=Math.atan2(Math.sin(diff),Math.cos(diff));player.angle+=diff*0.15;player.fireCooldown=Math.max(0,player.fireCooldown-dt);if(mouse.down&&player.fireCooldown<=0){fireBullet(player,player.angle);player.fireCooldown=0.22;}for(let i=bullets.length-1;i>=0;i--){const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;let remove=false;for(const o of obstacles){if(circleRectColl(b.x,b.y,4,o.x,o.y,o.w,o.h)){remove=true;break;}}if(b.x<0||b.x>W||b.y<0||b.y>H)remove=true;if(!remove){if(b.owner!=='enemy'){for(const en of enemies){if(dist2(b.x,b.y,en.x,en.y)<(en.radius+4)*(en.radius+4)){en.hp-=20;en.vx+=b.vx*0.03;en.vy+=b.vy*0.03;remove=true;break;}}}else{if(dist2(b.x,b.y,player.x,player.y)<(player.radius+4)*(player.radius+4)){player.hp-=10;player.vx+=b.vx*0.01;player.vy+=b.vy*0.01;remove=true;}}}if(remove||b.life<=0)bullets.splice(i,1);}for(const en of enemies){const dx=player.x-en.x,dy=player.y-en.y;const d=Math.hypot(dx,dy);if(d>0.5){en.vx+=(dx/d)*40*dt;en.vy+=(dy/d)*40*dt;}en.vx*=0.95;en.vy*=0.95;en.x+=en.vx*dt;en.y+=en.vy*dt;resolveCircleRect(en);en.shotTimer-=dt;if(en.shotTimer<=0){en.shotTimer=1.2+Math.random()*1.2;const a=Math.atan2(player.y-en.y,player.x-en.x);const spd=300;bullets.push(makeBullet(en.x+Math.cos(a)*en.radius,en.y+Math.sin(a)*en.radius,Math.cos(a)*spd,Math.sin(a)*spd,'enemy'));}}for(let i=enemies.length-1;i>=0;i--){if(enemies[i].hp<=0)enemies.splice(i,1);}resolveCircleRect(player);if(dist2(player.x,player.y,gate.x,gate.y)<(player.radius+gate.r)*(player.radius+gate.r))loadLevel(currentLevelIndex+1);if(player.hp<=0){showMessage('YOU DIED — Restarting level...');loadLevel(currentLevelIndex);}updateHud();}
+function updateHud(){document.getElementById('hp').textContent=Math.max(0,Math.round(player.hp));document.getElementById('enCnt').textContent=enemies.length;}
+function fireBullet(pl,angle){const spd=520;const bx=pl.x+Math.cos(angle)*(pl.radius+8);const by=pl.y+Math.sin(angle)*(pl.radius+8);const bvx=Math.cos(angle)*spd,bvy=Math.sin(angle)*spd;bullets.push(makeBullet(bx,by,bvx,bvy,'player'));pl.vx-=bvx*0.0012;pl.vy-=bvy*0.0012;}
+function draw(){ctx.clearRect(0,0,W,H);ctx.fillStyle='#182232';ctx.fillRect(0,0,W,H);ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.lineWidth=1;for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}ctx.fillStyle='#2f3b46';for(const o of obstacles){ctx.fillRect(o.x,o.y,o.w,o.h);}ctx.beginPath();ctx.arc(gate.x,gate.y,gate.r,0,Math.PI*2);ctx.fillStyle='#3be55a88';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#2d8f3a';ctx.stroke();for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fillStyle=(b.owner==='enemy')?'#f55':'#ffd';ctx.fill();}
+for(const en of enemies){ctx.save();ctx.translate(en.x,en.y);ctx.rotate(Math.atan2(en.vy,en.vx)||0);ctx.fillStyle='#b24';ctx.beginPath();ctx.rect(-en.radius,-en.radius,en.radius*2,en.radius*2);ctx.fill();ctx.fillStyle='#7a0';ctx.beginPath();ctx.rect(0,-6,en.radius+8,12);ctx.fill();ctx.restore();ctx.fillStyle='#222';ctx.fillRect(en.x-18,en.y-en.radius-12,36,6);ctx.fillStyle='#f55';ctx.fillRect(en.x-18,en.y-en.radius-12,36*clamp(en.hp/30,0,1),6);}
+// draw airplane player
+ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+// engine smoke trail
+ctx.beginPath();ctx.moveTo(-player.radius-6,0);ctx.lineTo(-player.radius-12,Math.sin(Date.now()*0.02)*3);ctx.strokeStyle='rgba(200,200,255,0.25)';ctx.lineWidth=4;ctx.stroke();
+// fuselage
+ctx.beginPath();ctx.moveTo(12,0);ctx.lineTo(-player.radius,-player.radius*0.6);ctx.lineTo(-player.radius,player.radius*0.6);ctx.closePath();ctx.fillStyle='#4fb';ctx.fill();
+// wings
+ctx.beginPath();ctx.moveTo(-4,-2);ctx.lineTo(-player.radius*0.2,-player.radius*1.6);ctx.lineTo(-player.radius*0.2,-player.radius*1.2);ctx.closePath();ctx.fillStyle='#2ea';ctx.fill();ctx.beginPath();ctx.moveTo(-4,2);ctx.lineTo(-player.radius*0.2,player.radius*1.6);ctx.lineTo(-player.radius*0.2,player.radius*1.2);ctx.closePath();ctx.fillStyle='#2ea';ctx.fill();
+// cockpit
+ctx.beginPath();ctx.ellipse(4,0,6,4,0,0,Math.PI*2);ctx.fillStyle='#cee';ctx.fill();
+// tail fins
+ctx.beginPath();ctx.moveTo(-player.radius+2,-6);ctx.lineTo(-player.radius-8,-10);ctx.lineTo(-player.radius+2,0);ctx.closePath();ctx.fillStyle='#3b6';ctx.fill();ctx.beginPath();ctx.moveTo(-player.radius+2,6);ctx.lineTo(-player.radius-8,10);ctx.lineTo(-player.radius+2,0);ctx.closePath();ctx.fillStyle='#3b6';ctx.fill();ctx.strokeStyle='rgba(0,0,0,0.12)';ctx.lineWidth=1;ctx.stroke();ctx.restore();
+ctx.fillStyle='#111';ctx.fillRect(12,12,160,18);ctx.fillStyle='#44ee77';ctx.fillRect(14,14,(player.hp/100)*156,14);ctx.strokeStyle='#000a';ctx.strokeRect(12,12,160,18);}
+function loop(){update();draw();requestAnimationFrame(loop);}function showMessage(txt){const div=document.createElement('div');div.style.position='fixed';div.style.left='50%';div.style.top='20%';div.style.transform='translateX(-50%)';div.style.background='rgba(10,10,10,0.85)';div.style.color='#fff';div.style.padding='12px 18px';div.style.borderRadius='10px';div.style.zIndex=9999;div.textContent=txt;document.body.appendChild(div);setTimeout(()=>div.remove(),1200);}
+document.getElementById('restart').addEventListener('click',()=>loadLevel(currentLevelIndex));loadLevel(0);requestAnimationFrame(loop);
+</script>
+</body>
+</html>
